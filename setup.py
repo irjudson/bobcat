@@ -6,7 +6,7 @@ setup(
 	author="Ivan R. Judson",
 	author_email="irjudson@gmail.com",
 	description="A set of tools to explore networkinig algorithms.",
-	license="",
+	license="Apache 2.0",
 	keywords="Network topology control cognitive radio",
 	url="github.com/irjudson/bobcat"
 )

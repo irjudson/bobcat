@@ -80,8 +80,10 @@ class Network(networkx.graph.Graph):
         self.beamset = defaultdict(lambda: defaultdict(dict))
 
         # Distribute the nodes randomly throughout the space
+        self.node[0]['type'] = 0
         for node in self:
-            self.node[node]['type'] = 2
+            if node != 0:
+                self.node[node]['type'] = 2
             self.node[node]['sectors'] = sectors
             self.node[node]['transmitter_gain'] = math.pow(10, 2.0 / 10)
             self.node[node]['receiver_gain'] = math.pow(10, 2.0 / 10)
@@ -106,8 +108,6 @@ class Network(networkx.graph.Graph):
             self.node[node]['location_x'] = location_x
             self.node[node]['location_y'] = location_y
 
-        self.node[0]['type'] = 0
-
         while relays > 0:
             node = random.choice(self.nodes())
             if self.node[node]['type'] not in [0,1]:
@@ -128,7 +128,7 @@ class Network(networkx.graph.Graph):
             self.init_edge(edge[0], edge[1])
 
     def initialize_edges(self):
-        self.primary_interference()
+        self.generate_primary_interference()
 
         # Remove dead edges
         for e in self.edges():
@@ -142,15 +142,12 @@ class Network(networkx.graph.Graph):
 
     def init_edge(self, src, dst):
         e = self[src][dst]
+        e['channels'] = dict()
         e['distance'] = self.distance(src, dst)
-        e['channels'] = {
-            700 : dict(),
-            2.4 : dict(),
-            5.8 : dict()
-        }
-        for j in e['channels'].keys():
-            for i in range(self.channels):
-                e['channels'][j][i] = self.throughput(src, dst, freq=j);
+        for freq in self.FREQUENCIES:
+            e['channels'][freq] = dict()
+            for chan in range(self.channels):
+                e['channels'][freq][chan] = self.throughput(src, dst, freq=freq)
 
     def prune_dead_edges(self):
         for e in self.edges():
@@ -163,7 +160,7 @@ class Network(networkx.graph.Graph):
 
     def draw(self):
         "Draw this graph with customizations for our toolkit."
-        self.update_throughput_for_nodes()
+        self.update_node_throughput()
         node_size = [self.node[node]['throughput'] for node in self]
         node_size = [(n / max(node_size)) * 400 for n in node_size]
         node_color = [float(self.node[node]['type']) for node in self]
@@ -250,7 +247,7 @@ class Network(networkx.graph.Graph):
         max_possible *= self.channels # channels
         return(max_possible - (1.0 * self.bottleneck_capacity(edge)))
         
-    def primary_interference(self):
+    def generate_primary_interference(self):
         for i in range(len(self.nodes()) * self.channels):
             src = random.choice(self.nodes())
             rand_freq = random.choice(signal_range.keys())
@@ -261,7 +258,7 @@ class Network(networkx.graph.Graph):
                     for e in networkx.edges(self, [dst]):
                         self[e[0]][e[1]]['channels'][rand_freq][rand_channel] = 0.0
 
-    def update_throughput_for_nodes(self):
+    def update_node_throughput(self):
         total_throughput = 0.0
         for n in self.nodes():
             neighbors = self.neighbors(n)
@@ -290,11 +287,9 @@ class Network(networkx.graph.Graph):
                                   self.distance(v1e2, v2e2) ]
                     distances.sort()
                     shortest = distances[0]
-                    
-                    vertices = set()
-                    vertices.update([v1e1, v2e1, v1e2, v2e2])
+                    vertices = set([v1e1, v2e1, v1e2, v2e2])
 
-                    for i in [700, 2.4, 5.8]:
+                    for i in self.FREQUENCIES:
                         for j in range(self.channels):
                             if self[edge1[0]][edge1[1]]['channels'][i][j] > 0.0 and self[edge2[0]][edge2[1]]['channels'][i][j] > 0.0:
                                 if shortest < signal_range[i] or len(vertices) < 4:

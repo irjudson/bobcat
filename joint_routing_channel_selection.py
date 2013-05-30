@@ -3,19 +3,27 @@
 # (c) 2013 Ivan R. Judson / Montana State University
 #
 
+import sys
 import pprint
 
 class PCS:
     def __init__(self, other=None):
-        if other:
+
+        if other is not None:
             self.path = other.path[:]
-            self.path_channel_set = other.path_channel_set.copy()
+            self.throughput = other.throughput
+            self.path_channel_set = Path(selected=other.path_channel_set.selected[:],
+                throughput=other.path_channel_set.throughput)
         else:
             self.path = list()
+            self.throughput = sys.float_info.max
             self.path_channel_set = Path()
 
+    def __repr__(self):
+        return "-- %s -- %s" % (self.path, self.path_channel_set)
+
 class Path:
-    def __init__(self, selected=list(), throughput=0.0):
+    def __init__(self, selected=list(), throughput=sys.float_info.max):
         # list of EdgeChannel Object Sets
         self.selected = selected
 
@@ -23,7 +31,7 @@ class Path:
         self.throughput = throughput
 
     def __repr__(self):
-        return "/ %0.2f / [ %s ]" % (self.throughput, self.selected)
+        return "/ %e / [ %s ]" % (self.throughput, self.selected)
 
 class Link:
     def __init__(self, edge=None, freq=-1.0, channel=-1):
@@ -68,8 +76,6 @@ def find_available_links(network, path):
             for c in range(network.channels):
                 if network[edge[0]][edge[1]]['channels'][freq][c] > 0.0:
                     available_links[i].add(Link(edge, freq, c))
-    print "Available Links: "
-    pprint.pprint(available_links)
     return available_links
 
 def check_interference(network, i, j, f, c):
@@ -129,6 +135,45 @@ def max_clique(network, links, loc, freq, channel):
         i += 1
     return max_size
 
+def throughput_for_test_path(network, old_path, test_path_channel_set):
+    path_len = len(old_path)
+    path = old_path[:]
+
+    if test_path_channel_set is None:
+        return 0.0
+
+    for i in range(0, path_len):
+        max_clique_size = 1
+        if path_len > 1:
+            max_clique_size = 2
+        if i > 1 and i < path_len:
+            left = set()
+            right = set()
+            for j in range(0, len(test_path_channel_set.selected)):
+                if j <= i:
+                    left.update(test_path_channel_set.selected[j])
+                else:
+                    right.update(test_path_channel_set.selected[j])                    
+
+            if len(left & right) > 0:
+                max_clique_size = 3
+
+        link_throughput = 0.0
+
+        for link in test_path_channel_set.selected[i]:
+            links = list()
+            for j in range(0, path_len):
+                test_link = Link(path[j], link.freq, link.channel)
+                if test_link in test_path_channel_set.selected[j]:
+                    links.append(j)
+
+            max_channel_clique_size = max(max_clique_size, max_clique(network, links, i, link.freq, link.channel))
+            link_throughput += (network[link.edge[0]][link.edge[1]]['channels'][link.freq][link.channel] / max_channel_clique_size)
+    
+        test_path_channel_set.throughput = min(test_path_channel_set.throughput, link_throughput)
+
+    return test_path_channel_set.throughput
+
 def throughput_for_path(network, path, bridging_set, path_len, available_links):
     i = len(path.selected)-1
     max_clique_size = 1
@@ -150,12 +195,8 @@ def throughput_for_path(network, path, bridging_set, path_len, available_links):
     for link in path.selected[i]:
         links = list()
         for j in range(0, i):
-            print "----"
-            test_link = Link(j, link.freq, link.channel)
-            pprint.pprint(test_link)
-            print "----"
-            pprint.pprint(path.selected[j])
-            print "----"
+            edge = network.edges()[j]
+            test_link = Link(edge, link.freq, link.channel)
             if test_link in path.selected[j]:
                 links.append(j)
 
@@ -167,11 +208,11 @@ def throughput_for_path(network, path, bridging_set, path_len, available_links):
 
         max_channel_clique_size = max(max_clique_size, max_clique(network, links, i, link.freq, link.channel))
         link_throughput += (network[link.edge[0]][link.edge[1]]['channels'][link.freq][link.channel] / max_channel_clique_size)
-
+    
     path.throughput = min(path.throughput, link_throughput)
 
 def select_channels(network, path):
-    if len(path) == 0:
+    if path is None or len(path) == 0:
         return 0.0
 
     path_len = len(path)
@@ -193,35 +234,19 @@ def select_channels(network, path):
     for k in range(bridging_set_count[0]):
         best_path_channel_set[0][k] = Path()
 
-    print "Path: %s Length: %d" % ( path, path_len )
-
     for i in range(1, len(path)):
-        print "I: %d " % i
         new_part = bridging_set[i].copy() - bridging_set[i-1]
         old_part = bridging_set[i].copy() & bridging_set[i-1]
 
-        print "Num Bridging Sets for %d : %d" % (i-1, bridging_set_count[i-1])
-
         for k in range(bridging_set_count[i-1]):
-            print "K: %d" % k
             previous_best = best_path_channel_set[i-1][k]
             previous_bridging_set = decode_set(network, bridging_set[i-1], k)
             copy_of_old_part = old_part.copy() & previous_bridging_set
             if len(new_part) == 0:
                 next_bridging_set_idx = encode_set(network, bridging_set[i], copy_of_old_part)
-                print "Next Bridging Set Index: %d" % next_bridging_set_idx
-                print "Previous Best:"
-                pprint.pprint(previous_best)
-                print "Previous Bridging Set:"
-                pprint.pprint(previous_bridging_set)
-                print "Available Links:"
-                pprint.pprint(available_links[i-1])
-                test_path = Path(selected=[previous_best.selected[:]])
+                test_path = Path(selected=previous_best.selected[:])
                 test_path.selected.append(previous_bridging_set.selected.copy() & available_links[i-1])
-                pprint.pprint(test_path)
                 throughput_for_path(network, test_path, previous_bridging_set, path_len, available_links)
-                print "I: %d NBI: %d" % (i, next_bridging_set_idx)
-                pprint.pprint(best_path_channel_set[i])
                 if next_bridging_set_idx not in best_path_channel_set[i] or \
                    test_path.throughput > best_path_channel_set[i][next_bridging_set_idx].throughput:
                     best_path_channel_set[i][next_bridging_set_idx] = test_path
@@ -230,20 +255,9 @@ def select_channels(network, path):
                     next_bridging_subset = decode_set(network, new_part, l) 
                     next_bridging_subset.update(old_part.copy())
                     next_bridging_set_idx = encode_set(network, bridging_set[i], next_bridging_subset)
-                    print "Previous Best:"
-                    pprint.pprint(previous_best)
-                    print "Previous Bridging Set:"
-                    pprint.pprint(previous_bridging_set)
-                    print "Available Links 2:"
-                    pprint.pprint(available_links[i-1])
-                    test_path = Path(selected=[previous_best.selected[:]])
-                    print "Test Path: %s"  % test_path
+                    test_path = Path(selected=previous_best.selected[:])
                     test_path.selected.append(previous_bridging_set.copy() & available_links[i-1])
-                    pprint.pprint(test_path)
-                    print "4"
                     throughput_for_path(network, test_path, next_bridging_subset, path_len, available_links)
-                    print "I: %d NBI: %d" % (i, next_bridging_set_idx)
-                    pprint.pprint(best_path_channel_set[i])
                     if next_bridging_set_idx not in best_path_channel_set[i] or \
                        test_path.throughput > best_path_channel_set[i][next_bridging_set_idx].throughput:
                         best_path_channel_set[i][next_bridging_set_idx] = test_path
@@ -251,16 +265,12 @@ def select_channels(network, path):
 
     optimal_path = None
     empty = set()
-    print "Number of bridging Subsets for %d: %d" % ( path_len - 1, bridging_set_count[path_len-1])
     for k in range(bridging_set_count[path_len - 1]):
         next_bridging_subset = decode_set(network, bridging_set[path_len - 1], k)
         previous_best = best_path_channel_set[path_len - 1][k]
-        pprint.pprint(previous_best)
-        pprint.pprint(next_bridging_subset)
-        test_path = Path(selected=[previous_best.selected[:]], 
+        test_path = Path(selected=previous_best.selected[:], 
                          throughput=previous_best.throughput)
         test_path.selected.append(next_bridging_subset.copy() & available_links[path_len - 1])
-        pprint.pprint(test_path)
         throughput_for_path(network, test_path, empty, path_len, available_links)
         if optimal_path is None or test_path.throughput > optimal_path.throughput:
             optimal_path = test_path
@@ -278,8 +288,6 @@ def select_channels_greedy(network, path):
 
     for i in range(1, path_len):
         remove_set = set()
-        print "%d %d" % (i, i-1)
-        pprint.pprint(greedy_path.selected)
         for link in greedy_path.selected[i-1]:
             new_link = Link(i, link.freq, link.channel)
             remove_set.add(new_link)
@@ -326,39 +334,75 @@ def select_channels_greedy(network, path):
         greedy_path.throughput = min(greedy_path.throughput, link_throughput)
     return greedy_path.throughput
 
-def combinations(network, current, combos):
-    combos.update(fcset)
-    for fc in current:
-        next = current.copy()
-        next.remove(fc)
+def combinations(current, combos):
+    combos.update(current)
+    for o in current:
+        next = current[:]
+        next.remove(o)
         if len(next) > 0:
-            combinations(next.clone(), combos)
+            combinations(next[:], combos)
+
+def vertices_for_path(path):
+    "path is a list of tuples of edges"
+    vertices = set()
+    [vertices.update(list(edge)) for edge in path]
+    return vertices
 
 def rcs_path(network, src, dst, consider=10):
     # Initialize
     for node in network.nodes():
         network.node[node]['rcs_paths'] = dict()
         if node == src:
-            network.node[node]['rcs_paths'][0.0, PCS()]
+            network.node[node]['rcs_paths'][0.0] = PCS()
 
     for i in range(len(network.nodes())):
         for e in network.edges():
             u = e[0]
             v = e[1]
-            combos = set()
-            fcset = list()
+            chset = set()
+            cset = list()
 
             for freq in network.FREQUENCIES:
                 for channel in range(network.channels):
                     if network[u][v]['channels'][freq][channel] > 0.0:
-                        fcset.add((freq, channel))
+                        cset.append((freq, channel))
 
-            combinations(fcset, combos)
+            combinations(cset, chset)
 
             for thpt, opcs in network.node[u]['rcs_paths'].items():
                 new_path = opcs.path[:]
-                if len(opcs.path) == i and v not in opcs.path:
-                    opathcs = opcs.path_channel_set
-                    for chs in combos:
+                if len(opcs.path) == i and v not in vertices_for_path(opcs.path):
+                    for chs in chset:
                         npcs = PCS(other=opcs)
-                        npcs.path += e
+                        npcs.path.append(e)
+                        nls = set()
+                        for freq in network.FREQUENCIES:
+                            for channel in range(0, network.channels):
+                                nls.add(Link(e, freq, channel))
+                        npcs.path_channel_set.selected.append(nls)
+                        thpt = throughput_for_test_path(network, npcs.path, npcs.path_channel_set)
+                        network.node[v]['rcs_paths'][thpt] = npcs
+                        if len(network.node[v]['rcs_paths'].keys()) > consider:
+                            del network.node[v]['rcs_paths'][min(network.node[v]['rcs_paths'].keys())]
+
+            for thpt, opcs in network.node[v]['rcs_paths'].items():
+                new_path = opcs.path[:]
+                if len(opcs.path) == i and u not in vertices_for_path(opcs.path):
+                    for chs in chset:
+                        npcs = PCS(other=opcs)
+                        npcs.path.append(e)
+                        nls = set()
+                        for freq in network.FREQUENCIES:
+                            for channel in range(0, network.channels):
+                                nls.add(Link(e, freq, channel))
+                        npcs.path_channel_set.selected.append(nls)
+                        thpt = throughput_for_test_path(network, npcs.path, npcs.path_channel_set)
+                        network.node[v]['rcs_paths'][thpt] = npcs
+                        if len(network.node[u]['rcs_paths'].keys()) > consider:
+                            del network.node[u]['rcs_paths'][min(network.node[u]['rcs_paths'].keys())]
+
+
+    if len(network.node[dst]['rcs_paths']) == 0:
+        return None
+
+    return network.node[dst]['rcs_paths'][max(network.node[dst]['rcs_paths'].keys())]

@@ -26,7 +26,7 @@ def KNN(network, K=3, beams=8):
             network.remove_edge(n,m)
 
     # Get Total Weight and return it
-    return network.update_throughput_for_nodes()
+    return network.update_node_throughput()
 
 def MST(network, beams=8):
     """ Directional Antenna Algorithm """
@@ -40,4 +40,4 @@ def MST(network, beams=8):
             node['active_beams'].add(network.beam_index(n, neighbor, beams))
 
     # Get Total Weight and return it
-    return network.update_throughput_for_nodes()
+    return network.update_node_throughput()
