@@ -3,6 +3,8 @@
 #  (c) 2013 Ivan R. Judson / Montana State University
 #
 
+import pprint
+
 def greedy1(network):
     for sub in network.subscribers:
         network.node[sub]['preferred_relay'] = None
@@ -171,11 +173,107 @@ import cplex
 from cplex.exceptions import CplexSolverError
 
 def optimal(network):
+    r = dict()
+    THRESHOLD = 0.0001
     model = cplex.Cplex()
+    model.set_problem_name("BS-RAP")
 
+    # Initialize y
+    names = ["y(%d)" % i for i in network.subscribers]
+    lb = [0.0] * len(names)
+    ub = [network.node[i]['queue_length'] for i in network.subscribers]
+    ty = [model.variables.type.continuous] * len(names)
+    model.variables.add(names=names, lb=lb, ub=ub, types=ty)
+
+    # Set the objective
+    coefficients = [(names.index("y(%d)" % i), network.node[i]['queue_length']) for i in network.subscribers]
+    model.objective.set_linear(coefficients)
+    model.objective.set_sense(model.objective.sense.maximize)
+
+    # 1. Initialize x
+    for i in network.relays:
+        r[i] = dict()
+        for j in network.subscribers:
+            r[i][j] = network.throughput(i, j, network.theta) * network.slot_length
+            model.variables.add(names=["x(%d)(%d)" % (i, j)], lb=[0], ub=[1], types=[model.variables.type.integer])
+            if r[i][j] < THRESHOLD:
+                model.linear_constraints.add(lin_expr=[["x(%d)(%d)" % (i,j)],[1.0]], rhs=[0], senses=["E"])
+
+    # 2. Initialize s
+    for i in network.relays:
+        for l in range(len(network.beamset[i])):
+            model.variables.add(names=["s(%d)(%d)" % (i, l)], lb=[0], ub=[1], types=[model.variables.type.integer])
+
+    # 3. Constraint 5
+    rows = list()
+    rhs = list()
+    senses = ""
+    for i in network.subscribers:
+        rows.append([["y(%d)" % i ], [1.0]])
+        rhs.append(network.node[i]['queue_length'])
+        senses += "L"
+    model.linear_constraints.add(lin_expr=rows, rhs=rhs, senses=senses)
+
+    # 4. Constraint 6
+    rows = list()
+    rhs = list()
+    senses = ""
+    for j in network.subscribers:
+        row = ["y(%d)" % j]
+        coefficients = [-1.0]
+        for i in network.relays:        
+            row.append("x(%d)(%d)" % (i,j))
+            coefficients.append(r[i][j])
+        rows.append([row, coefficients])
+        rhs.append(0.0)
+        senses += "L"
+    model.linear_constraints.add(lin_expr=rows, rhs=rhs, senses=senses)
+
+    # 5. Constraint 7
+    names = list()
+    for j in network.subscribers:
+        for i in network.relays:
+            names.append("x(%d)(%d)" % (i,j))
+    model.linear_constraints.add(lin_expr=[[names, [1.0] * len(names)]], rhs=[1.0], senses=["L"])
+
+    # 6. Constraint 8
+    names = list()
+    for i in network.relays:
+        for l in range(len(network.beamset[i])):
+            names.append("s(%d)(%d)" % (i, l))
+    model.linear_constraints.add(lin_expr=[[names, [1.0] * len(names)]], rhs=[1.0], senses=["E"])
+
+
+    # 7.  Constaint 9
+    rhs = list()
+    rows = list()
+    senses = ""
+    for i in network.relays:
+        for j in network.subscribers:
+            lhs = ["x(%d)(%d)" % (i,j)]
+            coefficients = [-1.0]
+            for l in range(len(network.beamset[i])):
+                if l in network.beamset[i] and j in network.beamset[i][l]:
+                    lhs.append("s(%d)(%d)" % (i, l))
+                    coefficients.append(1.0)
+            rows.append([lhs, coefficients])
+            rhs.append(0.0)
+            senses += "G"
+    model.linear_constraints.add(lin_expr=rows, rhs=rhs, senses=senses)
+
+    # 8. Constraint 10
+    names = list()
+    for i in network.relays:
+        for j in network.subscribers:
+            names.append("x(%d)(%d)" % (i,j))
+    model.linear_constraints.add(lin_expr=[[names, [1.0] * len(names)]], rhs=[network.channels], senses=["L"])
+
+    # Solve the problem, return the value    
     try:
         model.write("bsrap.lp")
+        model.set_results_stream(None)
         model.solve()
+        return(model.solution.get_objective_value())
     except CplexSolverError, e:
         print "Exception raised during solve: " + e
     else:
