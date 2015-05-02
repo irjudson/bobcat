@@ -270,11 +270,12 @@ def optimal(network):
 
     # Solve the problem, return the value    
     try:
-        model.write("bsrap.lp")
+#        model.write("bsrap.lp")
+        model.write("bsrap.mps")
         model.set_results_stream(None)
         model.solve()
         return(model.solution.get_objective_value())
-    except CplexSolverError, e:
-        print "Exception raised during solve: " + e
+    except CplexSolverError as e:
+        print("Exception raised during solve: ", e)
     else:
-        print "Solved optimal solution."
+        print("Solved optimal solution.")

@@ -250,7 +250,7 @@ class Network(networkx.graph.Graph):
     def generate_primary_interference(self):
         for i in range(len(self.nodes()) * self.channels):
             src = random.choice(self.nodes())
-            rand_freq = random.choice(signal_range.keys())
+            rand_freq = random.choice(list(signal_range.keys()))
             rand_channel = random.randint(0, self.channels-1)
             ns_range = signal_range[rand_freq]
             for dst in self.nodes():

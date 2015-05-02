@@ -203,7 +203,8 @@ def throughput_for_path(network, path, bridging_set, path_len, available_links):
         links.append(i)
 
         for link2 in bridging_set:
-            if link.channel == link2.channel and link.freq == link2.freq and link2.edge > i:
+            if link.channel == link2.channel and link.freq == link2.freq \
+                    and link2.edge[0] > i:
                 links.append(link.edge)
 
         max_channel_clique_size = max(max_clique_size, max_clique(network, links, i, link.freq, link.channel))
@@ -295,7 +296,7 @@ def select_channels_greedy(network, path):
         if len(next_set) > 0:
             greedy_path.selected.append(next_set)
         else:
-            print type(available_links[i])
+            print(type(available_links[i]))
             greedy_path.selected.append(available_links[i])
 
     for i in range(0, path_len):
@@ -385,7 +386,7 @@ def rcs_path(network, src, dst, consider=10):
                         if len(network.node[v]['rcs_paths'].keys()) > consider:
                             del network.node[v]['rcs_paths'][min(network.node[v]['rcs_paths'].keys())]
 
-            for thpt, opcs in network.node[v]['rcs_paths'].items():
+            for thpt, opcs in list(network.node[v]['rcs_paths'].items()):
                 new_path = opcs.path[:]
                 if len(opcs.path) == i and u not in vertices_for_path(opcs.path):
                     for chs in chset:

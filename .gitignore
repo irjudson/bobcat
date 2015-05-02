@@ -3,6 +3,14 @@
 # C extensions
 *.so
 
+# Model files
+*.lp
+*.mps
+
+# Virtualenv directories
+dev
+dev2
+
 # Packages
 *.egg
 *.egg-info
